@@ -33,10 +33,38 @@ async function compressMedia() {
     let inputDir = './src';
     let outputDir = './dist';
     
-    // Parse arguments
-    if (args.includes('--camera')) {
-        inputDir = path.resolve(__dirname, '../../Camera uploads/');
-        outputDir = path.resolve(__dirname, '../../Camera uploads/compressed');
+    // Load custom directories from JSON config
+    if (fs.existsSync('dirs.json')) {
+        try {
+            const directories = JSON.parse(fs.readFileSync('dirs.json', 'utf8'));
+            console.log('Found dirs.json');
+            
+            // Check if user specified a config name via --config argument
+            const configIndex = args.findIndex(arg => arg === '--config');
+            if (configIndex !== -1 && args[configIndex + 1]) {
+                const configName = args[configIndex + 1];
+                const selectedConfig = directories.find(dir => dir.name === configName);
+                if (selectedConfig) {
+                    inputDir = path.resolve(selectedConfig.src);
+                    outputDir = selectedConfig.dist ? path.resolve(selectedConfig.dist) : path.resolve(selectedConfig.src, 'compressed');
+                    console.log(`Using config: ${configName}`);
+                } else {
+                    console.log(`Config "${configName}" not found. Available configs: ${directories.map(d => d.name).join(', ')}`);
+                    process.exit(1);
+                }
+            } else {
+                // Use first config as default if no specific config specified
+                const defaultConfig = directories[0];
+                if (defaultConfig) {
+                    inputDir = path.resolve(defaultConfig.src);
+                    outputDir = defaultConfig.dist ? path.resolve(defaultConfig.dist) : path.resolve(defaultConfig.src, 'compressed');
+                    console.log(`Using default config: ${defaultConfig.name}`);
+                }
+            }
+        } catch (error) {
+            console.log('Error reading dirs.json:', error.message);
+            console.log('Using default directories');
+        }
     }
     
     const imageOnly = args.includes('--images-only');
@@ -86,12 +114,27 @@ async function compressMedia() {
     console.log(`Source directory: ${inputDir}`);
     console.log(`Output directory: ${outputDir}\n`);
     
+    if (filesToProcess.length === 0) {
+        console.log('No files to compress. Add some images or videos to the source folder.');
+        return;
+    }
+    
     let processed = 0;
+    let successful = 0;
+    let failed = 0;
     const total = filesToProcess.length;
+    const startTime = Date.now();
 
     for (const { file, type } of filesToProcess) {
         try {
             const inputPath = path.join(inputDir, file);
+            
+            // Show progress
+            console.log(`\n[${processed + 1}/${total}] ${file} (${type})`);
+            const progressPercent = Math.floor((processed / total) * 100);
+            const progressBar = '='.repeat(Math.floor(progressPercent / 5)) + 
+                               '-'.repeat(20 - Math.floor(progressPercent / 5));
+            console.log(`Progress: [${progressBar}] ${progressPercent}%`);
             
             if (type === 'image') {
                 await compressImage(inputPath, outputDir, file);
@@ -99,22 +142,37 @@ async function compressMedia() {
                 await compressVideo(inputPath, outputDir, file, videoQuality);
             }
             
-            processed++;
+            successful++;
             
         } catch (error) {
-            console.error(`Error compressing ${file}:`, error.message);
+            console.error(`ERROR: Failed to compress ${file} - ${error.message}`);
+            failed++;
         }
+        
+        processed++;
     }
 
-    console.log('\nCompression completed!');
-    console.log(`Processed files: ${processed}/${total}`);
+    const endTime = Date.now();
+    const totalTime = Math.floor((endTime - startTime) / 1000);
+    const minutes = Math.floor(totalTime / 60);
+    const seconds = totalTime % 60;
+
+    console.log('\n=== COMPRESSION COMPLETED ===');
+    console.log(`Total files: ${total}`);
+    console.log(`Successful: ${successful}`);
+    if (failed > 0) {
+        console.log(`Failed: ${failed}`);
+    }
+    console.log(`Time taken: ${minutes}m ${seconds}s`);
+    
+    if (successful > 0) {
+        console.log(`\nCompressed files saved to: ${outputDir}`);
+    }
 }
 
 async function compressImage(inputPath, outputDir, fileName) {
     const outputPath = path.join(outputDir, fileName);
     const ext = path.extname(fileName).toLowerCase();
-
-    console.log(`Compressing image: ${fileName}`);
 
     try {
         if (ext === '.png') {
@@ -175,7 +233,7 @@ async function compressImage(inputPath, outputDir, fileName) {
         const originalSize = fs.statSync(inputPath).size;
         const compressedSize = fs.statSync(outputPath).size;
         const reduction = ((originalSize - compressedSize) / originalSize * 100).toFixed(1);
-        console.log(`   ${fileName} - reduced by ${reduction}% (${(originalSize/1024/1024).toFixed(1)}MB -> ${(compressedSize/1024/1024).toFixed(1)}MB)`);
+        console.log(`Reduced by ${reduction}% (${(originalSize/1024/1024).toFixed(1)}MB -> ${(compressedSize/1024/1024).toFixed(1)}MB)`);
         
     } catch (error) {
         throw new Error(`Image compression error: ${error.message}`);
@@ -185,8 +243,6 @@ async function compressImage(inputPath, outputDir, fileName) {
 async function compressVideo(inputPath, outputDir, fileName, quality) {
     const nameWithoutExt = path.parse(fileName).name;
     const outputPath = path.join(outputDir, `${nameWithoutExt}_compressed.mp4`);
-
-    console.log(`Compressing video: ${fileName} (quality: ${quality})`);
 
     // Quality settings
     const qualitySettings = {
@@ -216,7 +272,7 @@ async function compressVideo(inputPath, outputDir, fileName, quality) {
         const originalSize = fs.statSync(inputPath).size;
         const compressedSize = fs.statSync(outputPath).size;
         const reduction = ((originalSize - compressedSize) / originalSize * 100).toFixed(1);
-        console.log(`   ${fileName} - reduced by ${reduction}% (${(originalSize/1024/1024).toFixed(1)}MB -> ${(compressedSize/1024/1024).toFixed(1)}MB)`);
+        console.log(`Reduced by ${reduction}% (${(originalSize/1024/1024).toFixed(1)}MB -> ${(compressedSize/1024/1024).toFixed(1)}MB)`);
         
     } catch (error) {
         // Try alternative method for format problems
@@ -243,7 +299,7 @@ async function compressVideo(inputPath, outputDir, fileName, quality) {
                 const originalSize = fs.statSync(inputPath).size;
                 const compressedSize = fs.statSync(outputPath).size;
                 const reduction = ((originalSize - compressedSize) / originalSize * 100).toFixed(1);
-                console.log(`   ${fileName} - reduced by ${reduction}% (${(originalSize/1024/1024).toFixed(1)}MB -> ${(compressedSize/1024/1024).toFixed(1)}MB)`);
+                console.log(`Reduced by ${reduction}% (${(originalSize/1024/1024).toFixed(1)}MB -> ${(compressedSize/1024/1024).toFixed(1)}MB)`);
             } catch (altError) {
                 throw new Error(`Video compression error (both methods): ${altError.message}`);
             }
@@ -278,9 +334,15 @@ function checkDependencies() {
         console.log('\nInstallation instructions:');
         console.log('1. Sharp: npm install sharp');
         console.log('2. FFmpeg:');
-        console.log('   - Windows: Download from https://ffmpeg.org/download.html');
-        console.log('   - macOS: brew install ffmpeg');
-        console.log('   - Ubuntu: sudo apt install ffmpeg');
+        console.log('   WINDOWS - EASIEST METHOD:');
+        console.log('   1. Open PowerShell as Administrator');
+        console.log('   2. Install Chocolatey: (copy this whole line)');
+        console.log('      Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString(\'https://community.chocolatey.org/install.ps1\'))');
+        console.log('   3. Install FFmpeg: choco install ffmpeg');
+        console.log('   4. Test: ffmpeg -version');
+        console.log('');
+        console.log('   macOS: brew install ffmpeg');
+        console.log('   Ubuntu: sudo apt install ffmpeg');
         process.exit(1);
     }
 }
@@ -293,12 +355,12 @@ MEDIA COMPRESSION TOOL - Images and Video
 Usage: node index.js [options]
 
 OPTIONS:
-  --camera           Use camera folder as source
   --images-only      Compress images only
   --video-only       Compress videos only
   --high-quality     High quality video (CRF 18)
   --low-quality      Low quality video (CRF 28)
   --clean            Clean output directory before compression
+  --config <name>    Use specific config from dirs.json
   --help             Show this help
 
 SUPPORTED FORMATS:
@@ -309,9 +371,28 @@ EXAMPLES:
   node index.js                    # Compress everything (default quality)
   node index.js --images-only      # Images only
   node index.js --video-only --high-quality  # Videos only in high quality
-  node index.js --camera           # Use camera folder
+  node index.js --config camera    # Use "camera" config from JSON
   node index.js --clean            # Clean output folder first
   node index.js --clean --video-only  # Clean and compress videos only
+
+CUSTOM DIRECTORIES:
+  Create dirs.json to define custom source/output folders:
+  [
+    {
+      "name": "camera",
+      "src": "../../Camera uploads/",
+      "dist": "../../Camera uploads/compressed"
+    },
+    {
+      "name": "photos", 
+      "src": "C:/Users/Photos",
+      "dist": "C:/Users/Photos/compressed"
+    },
+    {
+      "name": "dropbox",
+      "src": "D:/Dropbox/images"
+    }
+  ]
 
 VIDEO QUALITY:
   --high-quality:    Best quality, largest files (CRF 18)
