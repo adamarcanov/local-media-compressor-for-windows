@@ -1,0 +1,38 @@
+{
+  "name": "media-compressor",
+  "version": "2.0.0",
+  "description": "Tool for compressing images and MP4 videos using Sharp and FFmpeg",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "compress": "node index.js",
+    "compress:images": "node index.js --images-only",
+    "compress:video": "node index.js --video-only",
+    "compress:hq": "node index.js --high-quality",
+    "compress:camera": "node index.js --camera",
+    "help": "node index.js --help"
+  },
+  "dependencies": {
+    "sharp": "^0.33.5"
+  },
+  "keywords": [
+    "image-compression",
+    "video-compression",
+    "ffmpeg",
+    "sharp",
+    "media-processing",
+    "mp4"
+  ],
+  "author": "Media Compressor Tool",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/media-compressor"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/media-compressor/issues"
+  }
+}
