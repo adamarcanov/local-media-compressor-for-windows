@@ -122,6 +122,8 @@ async function compressMedia() {
     let processed = 0;
     let successful = 0;
     let failed = 0;
+    let totalOriginalSize = 0;
+    let totalCompressedSize = 0;
     const total = filesToProcess.length;
     const startTime = Date.now();
 
@@ -137,10 +139,19 @@ async function compressMedia() {
             console.log(`Progress: [${progressBar}] ${progressPercent}%`);
             
             if (type === 'image') {
-                await compressImage(inputPath, outputDir, file);
+                const { originalSize, compressedSize } = await compressImage(inputPath, outputDir, file);
+                totalOriginalSize += originalSize;
+                totalCompressedSize += compressedSize;
             } else if (type === 'video') {
-                await compressVideo(inputPath, outputDir, file, videoQuality);
+                const { originalSize, compressedSize } = await compressVideo(inputPath, outputDir, file, videoQuality);
+                totalOriginalSize += originalSize;
+                totalCompressedSize += compressedSize;
             }
+            
+            // Show running totals
+            const totalSavedMB = (totalOriginalSize - totalCompressedSize) / 1024 / 1024;
+            const totalReduction = ((totalOriginalSize - totalCompressedSize) / totalOriginalSize * 100);
+            console.log(`Running total: ${(totalOriginalSize/1024/1024).toFixed(1)}MB -> ${(totalCompressedSize/1024/1024).toFixed(1)}MB (saved ${totalSavedMB.toFixed(1)}MB, ${totalReduction.toFixed(1)}%)`);
             
             successful++;
             
@@ -163,6 +174,14 @@ async function compressMedia() {
     if (failed > 0) {
         console.log(`Failed: ${failed}`);
     }
+    
+    if (successful > 0) {
+        const finalSavedMB = (totalOriginalSize - totalCompressedSize) / 1024 / 1024;
+        const finalReduction = ((totalOriginalSize - totalCompressedSize) / totalOriginalSize * 100);
+        console.log(`Final compression: ${(totalOriginalSize/1024/1024).toFixed(1)}MB -> ${(totalCompressedSize/1024/1024).toFixed(1)}MB`);
+        console.log(`Total saved: ${finalSavedMB.toFixed(1)}MB (${finalReduction.toFixed(1)}% reduction)`);
+    }
+    
     console.log(`Time taken: ${minutes}m ${seconds}s`);
     
     if (successful > 0) {
@@ -235,6 +254,8 @@ async function compressImage(inputPath, outputDir, fileName) {
         const reduction = ((originalSize - compressedSize) / originalSize * 100).toFixed(1);
         console.log(`Reduced by ${reduction}% (${(originalSize/1024/1024).toFixed(1)}MB -> ${(compressedSize/1024/1024).toFixed(1)}MB)`);
         
+        return { originalSize, compressedSize };
+        
     } catch (error) {
         throw new Error(`Image compression error: ${error.message}`);
     }
@@ -274,6 +295,8 @@ async function compressVideo(inputPath, outputDir, fileName, quality) {
         const reduction = ((originalSize - compressedSize) / originalSize * 100).toFixed(1);
         console.log(`Reduced by ${reduction}% (${(originalSize/1024/1024).toFixed(1)}MB -> ${(compressedSize/1024/1024).toFixed(1)}MB)`);
         
+        return { originalSize, compressedSize };
+        
     } catch (error) {
         // Try alternative method for format problems
         if (error.message.includes('Invalid data found') || error.message.includes('moov atom not found')) {
@@ -300,6 +323,7 @@ async function compressVideo(inputPath, outputDir, fileName, quality) {
                 const compressedSize = fs.statSync(outputPath).size;
                 const reduction = ((originalSize - compressedSize) / originalSize * 100).toFixed(1);
                 console.log(`Reduced by ${reduction}% (${(originalSize/1024/1024).toFixed(1)}MB -> ${(compressedSize/1024/1024).toFixed(1)}MB)`);
+                return { originalSize, compressedSize };
             } catch (altError) {
                 throw new Error(`Video compression error (both methods): ${altError.message}`);
             }
