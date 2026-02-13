@@ -91,17 +91,40 @@ async function compressMedia() {
         console.log('Output directory cleaned.\n');
     }
 
-    // Filter files by type
-    const allFiles = fs.readdirSync(inputDir);
-    const imageFiles = allFiles.filter(file => {
-        const ext = path.extname(file).toLowerCase();
-        return ['.png', '.jpg', '.jpeg', '.webp', '.tiff', '.bmp'].includes(ext);
-    });
+    // Filter files by type (recursive)
+    function scanDirectory(dir, baseDir = dir) {
+        let imageFiles = [];
+        let videoFiles = [];
+        
+        const items = fs.readdirSync(dir);
+        for (const item of items) {
+            const fullPath = path.join(dir, item);
+            const stat = fs.statSync(fullPath);
+            
+            if (stat.isDirectory()) {
+                // Skip compressed folders
+                if (item === 'compressed') continue;
+                
+                // Recursively scan subdirectory
+                const subFiles = scanDirectory(fullPath, baseDir);
+                imageFiles.push(...subFiles.imageFiles);
+                videoFiles.push(...subFiles.videoFiles);
+            } else {
+                const ext = path.extname(item).toLowerCase();
+                const relativePath = path.relative(baseDir, fullPath);
+                
+                if (['.png', '.jpg', '.jpeg', '.webp', '.tiff', '.bmp'].includes(ext)) {
+                    imageFiles.push(relativePath);
+                } else if (['.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v'].includes(ext)) {
+                    videoFiles.push(relativePath);
+                }
+            }
+        }
+        
+        return { imageFiles, videoFiles };
+    }
     
-    const videoFiles = allFiles.filter(file => {
-        const ext = path.extname(file).toLowerCase();
-        return ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v'].includes(ext);
-    });
+    const { imageFiles, videoFiles } = scanDirectory(inputDir);
 
     let filesToProcess = [];
     if (!videoOnly) filesToProcess.push(...imageFiles.map(f => ({ file: f, type: 'image' })));
@@ -130,6 +153,13 @@ async function compressMedia() {
     for (const { file, type } of filesToProcess) {
         try {
             const inputPath = path.join(inputDir, file);
+            const outputPath = path.join(outputDir, file);
+            
+            // Create output directory structure
+            const outputDirForFile = path.dirname(outputPath);
+            if (!fs.existsSync(outputDirForFile)) {
+                fs.mkdirSync(outputDirForFile, { recursive: true });
+            }
             
             // Show progress
             console.log(`\n[${processed + 1}/${total}] ${file} (${type})`);
@@ -139,11 +169,11 @@ async function compressMedia() {
             console.log(`Progress: [${progressBar}] ${progressPercent}%`);
             
             if (type === 'image') {
-                const { originalSize, compressedSize } = await compressImage(inputPath, outputDir, file);
+                const { originalSize, compressedSize } = await compressImage(inputPath, outputDirForFile, path.basename(file));
                 totalOriginalSize += originalSize;
                 totalCompressedSize += compressedSize;
             } else if (type === 'video') {
-                const { originalSize, compressedSize } = await compressVideo(inputPath, outputDir, file, videoQuality);
+                const { originalSize, compressedSize } = await compressVideo(inputPath, outputDirForFile, path.basename(file), videoQuality);
                 totalOriginalSize += originalSize;
                 totalCompressedSize += compressedSize;
             }
@@ -263,7 +293,7 @@ async function compressImage(inputPath, outputDir, fileName) {
 
 async function compressVideo(inputPath, outputDir, fileName, quality) {
     const nameWithoutExt = path.parse(fileName).name;
-    const outputPath = path.join(outputDir, `${nameWithoutExt}.mp4`);
+    const outputPath = path.join(outputDir, `${nameWithoutExt}_compressed.mp4`);
 
     // Quality settings
     const qualitySettings = {
