@@ -263,7 +263,7 @@ async function compressImage(inputPath, outputDir, fileName) {
 
 async function compressVideo(inputPath, outputDir, fileName, quality) {
     const nameWithoutExt = path.parse(fileName).name;
-    const outputPath = path.join(outputDir, `${nameWithoutExt}_compressed.mp4`);
+    const outputPath = path.join(outputDir, `${nameWithoutExt}.mp4`);
 
     // Quality settings
     const qualitySettings = {
