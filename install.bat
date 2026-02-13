@@ -159,16 +159,15 @@ if not exist "dist" (
 )
 
 REM Copy any image files from main directory to src for testing
-for %%f in (*.jpg *.jpeg *.png *.bmp *.tiff *.webp) do (
+for %%f in (includes\*.jpg includes\*.jpeg includes\*.png includes\*.bmp includes\*.tiff includes\*.webp) do (
     echo Copying %%f to src folder...
-    copy "%%f" "src\%%f" >nul 2>&1
+    copy "%%f" "src\" >nul 2>&1
 )
-echo Test environment ready
 echo Test environment ready
 
 echo.
 echo [5/6] Running test compression...
-node includes/index.js --images-only
+node includes/index.js --test-only
 echo Test compression completed
 echo.
 echo [6/6] Installation complete!

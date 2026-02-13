@@ -34,6 +34,8 @@ async function compressMedia() {
     let outputDir = './dist';
     
     // Load custom directories from JSON config
+    let allDirectoriesToScan = [{ name: 'default', src: inputDir, dist: outputDir }];
+    
     if (fs.existsSync('dirs.json')) {
         try {
             const directories = JSON.parse(fs.readFileSync('dirs.json', 'utf8'));
@@ -48,18 +50,25 @@ async function compressMedia() {
                     inputDir = path.resolve(selectedConfig.src);
                     outputDir = selectedConfig.dist ? path.resolve(selectedConfig.dist) : path.resolve(selectedConfig.src, 'compressed');
                     console.log(`Using config: ${configName}`);
+                    allDirectoriesToScan = [{ name: configName, src: inputDir, dist: outputDir }];
                 } else {
                     console.log(`Config "${configName}" not found. Available configs: ${directories.map(d => d.name).join(', ')}`);
                     process.exit(1);
                 }
             } else {
-                // Use first config as default if no specific config specified
-                const defaultConfig = directories[0];
-                if (defaultConfig) {
-                    inputDir = path.resolve(defaultConfig.src);
-                    outputDir = defaultConfig.dist ? path.resolve(defaultConfig.dist) : path.resolve(defaultConfig.src, 'compressed');
-                    console.log(`Using default config: ${defaultConfig.name}`);
+                // Add all configured directories to scan list
+                for (const config of directories) {
+                    const configSrc = path.resolve(config.src);
+                    const configDist = config.dist ? path.resolve(config.dist) : path.resolve(config.src, 'compressed');
+                    if (fs.existsSync(configSrc)) {
+                        allDirectoriesToScan.push({
+                            name: config.name,
+                            src: configSrc, 
+                            dist: configDist
+                        });
+                    }
                 }
+                console.log(`Will scan ${allDirectoriesToScan.length} directories: ${allDirectoriesToScan.map(d => d.name).join(', ')}`);
             }
         } catch (error) {
             console.log('Error reading dirs.json:', error.message);
@@ -70,6 +79,7 @@ async function compressMedia() {
     const imageOnly = args.includes('--images-only');
     const videoOnly = args.includes('--video-only');
     const cleanOutput = args.includes('--clean');
+    const testOnly = args.includes('--test-only');
     const videoQuality = args.includes('--high-quality') ? 'high' : 
                         args.includes('--low-quality') ? 'low' : 'medium';
 
@@ -124,11 +134,55 @@ async function compressMedia() {
         return { imageFiles, videoFiles };
     }
     
+    // Scan default directory first
     const { imageFiles, videoFiles } = scanDirectory(inputDir);
+    console.log(`Default (${inputDir}): ${imageFiles.length} images, ${videoFiles.length} videos`);
 
     let filesToProcess = [];
-    if (!videoOnly) filesToProcess.push(...imageFiles.map(f => ({ file: f, type: 'image' })));
-    if (!imageOnly) filesToProcess.push(...videoFiles.map(f => ({ file: f, type: 'video' })));
+    if (!videoOnly) filesToProcess.push(...imageFiles.map(f => ({ file: f, type: 'image', inputDir, outputDir })));
+    if (!imageOnly) filesToProcess.push(...videoFiles.map(f => ({ file: f, type: 'video', inputDir, outputDir })));
+
+    // If dirs.json exists and no specific config selected, scan additional directories
+    if (fs.existsSync('dirs.json') && !args.includes('--config')) {
+        try {
+            const directories = JSON.parse(fs.readFileSync('dirs.json', 'utf8'));
+            
+            for (const config of directories) {
+                const configSrc = path.resolve(config.src);
+                const configDist = config.dist ? path.resolve(config.dist) : path.resolve(config.src, 'compressed');
+                
+                // Skip if this is the same as default directory
+                if (configSrc === path.resolve(inputDir)) continue;
+                
+                if (fs.existsSync(configSrc)) {
+                    const { imageFiles: moreImages, videoFiles: moreVideos } = scanDirectory(configSrc);
+                    if (moreImages.length > 0 || moreVideos.length > 0) {
+                        console.log(`${config.name} (${configSrc}): ${moreImages.length} images, ${moreVideos.length} videos`);
+                        
+                        // Add files from this directory
+                        if (!videoOnly) filesToProcess.push(...moreImages.map(f => ({ file: f, type: 'image', inputDir: configSrc, outputDir: configDist })));
+                        if (!imageOnly) filesToProcess.push(...moreVideos.map(f => ({ file: f, type: 'video', inputDir: configSrc, outputDir: configDist })));
+                    }
+                }
+            }
+        } catch (error) {
+            console.log('Error reading additional directories from dirs.json');
+        }
+    }
+
+    // If test-only mode, look specifically for test.png
+    if (testOnly) {
+        const testFile = filesToProcess.find(f => f.file.toLowerCase().includes('test.png'));
+        if (testFile) {
+            filesToProcess = [testFile];
+            console.log('Test mode: will compress test.png only');
+        } else {
+            console.log('Test mode: test.png not found, using first available file');
+            if (filesToProcess.length > 0) {
+                filesToProcess = [filesToProcess[0]];
+            }
+        }
+    }
 
     console.log(`\n=== MEDIA COMPRESSION ===`);
     console.log(`Found ${imageFiles.length} images and ${videoFiles.length} videos`);
@@ -150,10 +204,35 @@ async function compressMedia() {
     const total = filesToProcess.length;
     const startTime = Date.now();
 
-    for (const { file, type } of filesToProcess) {
+    for (const { file, type, inputDir: fileInputDir, outputDir: fileOutputDir } of filesToProcess) {
         try {
-            const inputPath = path.join(inputDir, file);
-            const outputPath = path.join(outputDir, file);
+            const currentInputDir = fileInputDir || inputDir;
+            const currentOutputDir = fileOutputDir || outputDir;
+            const inputPath = path.join(currentInputDir, file);
+            let outputPath = path.join(currentOutputDir, file);
+            
+            // For videos, adjust output path to include "_compressed" suffix
+            if (type === 'video') {
+                const nameWithoutExt = path.parse(file).name;
+                const outputFolder = path.dirname(outputPath);
+                outputPath = path.join(outputFolder, `${nameWithoutExt}_compressed.mp4`);
+            }
+            
+            // Debug info for test mode
+            if (testOnly) {
+                console.log(`DEBUG: inputPath = ${inputPath}`);
+                console.log(`DEBUG: outputPath = ${outputPath}`);
+                console.log(`DEBUG: inputDir = ${currentInputDir}`);
+                console.log(`DEBUG: outputDir = ${currentOutputDir}`);
+                console.log(`DEBUG: file = ${file}`);
+            }
+            
+            // Check if compressed file already exists
+            if (fs.existsSync(outputPath)) {
+                console.log(`\n[${processed + 1}/${total}] ${file} (${type}) - SKIPPED (already compressed)`);
+                processed++;
+                continue;
+            }
             
             // Create output directory structure
             const outputDirForFile = path.dirname(outputPath);
@@ -414,6 +493,7 @@ OPTIONS:
   --high-quality     High quality video (CRF 18)
   --low-quality      Low quality video (CRF 28)
   --clean            Clean output directory before compression
+  --test-only        Compress only one file for testing
   --config <name>    Use specific config from dirs.json
   --help             Show this help
 
